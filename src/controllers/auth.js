@@ -1,5 +1,4 @@
 const authServices = require("../services/auth");
-const jwt = require("jsonwebtoken");
 
 exports.register = async (req, res) => {
     try {
@@ -26,15 +25,15 @@ exports.login = async (req, res) => {
 
         const jwtPayload = {
             userID: user.userID,
-            phoneNumber: user.phoneNumber,
             role: user.role,
         };
 
-        const token = jwt.sign(jwtPayload, process.env.JWTSECRET, { expiresIn: "1h" });
+        const [accessToken, refreshToken] = await authServices.generateAuthTokens(jwtPayload);
 
         return res.status(200).json({
             message: "User has been logged in",
-            token: "Bearer " + token,
+            accessToken: "Bearer " + accessToken,
+            refreshToken,
             data: {
                 userID: user.userID,
                 phoneNumber: user.phoneNumber,
@@ -46,6 +45,23 @@ exports.login = async (req, res) => {
         });
     } catch (error) {
         console.log(error);
+        return res.status(error.code || 500).json({
+            message: error.message,
+        });
+    }
+};
+
+exports.refreshToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+
+        const accessToken = await authServices.refreshAccessToken(refreshToken);
+
+        return res.status(200).json({
+            message: "Access token has been refreshed",
+            accessToken: "Bearer " + accessToken,
+        });
+    } catch (error) {
         return res.status(error.code || 500).json({
             message: error.message,
         });

@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
+const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { NotFoundError, UnauthorizedError } = require("../utils/errors");
 
@@ -22,18 +23,61 @@ exports.createUser = async ({ name, phoneNumber, password }) => {
     return user.rows[0];
 };
 
-exports.comparePassword = async (password, hashedPassword) => {
-    const isPasswordMatch = await bcrypt.compare(password, hashedPassword);
-    return isPasswordMatch;
-};
-
 exports.authorizeUser = async ({ phoneNumber, password }) => {
     const user = await this.getUserbyPhoneNumber(phoneNumber);
 
     if (!user) throw new NotFoundError("User not found");
 
-    const isPasswordMatch = await this.comparePassword(password, user.passwordHash);
+    const isPasswordMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordMatch) throw new UnauthorizedError("Password is incorrect");
 
     return user;
+};
+
+exports.checkUserToken = async (userID) => {
+    const token = await pool.query('SELECT * FROM "Token" WHERE "userID" = $1', [userID]);
+    if (!token.rows[0]) return false;
+    return true;
+};
+
+exports.getToken = async (refreshToken) => {
+    const token = await pool.query('SELECT * FROM "Token" WHERE "token" = $1', [refreshToken]);
+    if (!token.rows[0]) throw new UnauthorizedError("Invalid refresh token");
+    return token.rows[0];
+};
+
+exports.generateAuthTokens = async (payload) => {
+    const tokenExist = await this.checkUserToken(payload.userID);
+
+    if (tokenExist) await pool.query('DELETE FROM "Token" WHERE "userID" = $1', [payload.userID]);
+
+    const accessToken = jwt.sign(payload, process.env.JWTSECRET, { expiresIn: "2h" });
+    const refreshToken = jwt.sign({}, process.env.JWTSECRET, { expiresIn: "30d" });
+
+    let expiresIn = new Date();
+    expiresIn.setDate(expiresIn.getDate() + 30);
+    expiresIn = expiresIn.getTime() / 1000;
+
+    await pool.query(`INSERT INTO "Token"("token", "userID", "expDate") VALUES($1, $2, to_timestamp(${expiresIn}))`, [refreshToken, payload.userID]);
+
+    return [accessToken, refreshToken];
+};
+
+exports.refreshAccessToken = async (refreshToken) => {
+    const token = await this.getToken(refreshToken);
+
+    if (token.expDate < new Date()) throw new UnauthorizedError("Refresh token expired");
+
+    const userData = await pool.query('SELECT "userID", role FROM "User" WHERE "userID" = $1', [token.userID]);
+
+    const user = userData.rows[0];
+
+    const payload = {
+        userID: user.userID,
+        role: user.role,
+    };
+
+    const accessToken = jwt.sign(payload, process.env.JWTSECRET, { expiresIn: "2h" });
+
+    return accessToken;
 };
