@@ -5,7 +5,7 @@ exports.register = async (req, res) => {
     try {
         const { name, phoneNumber, password } = req.body;
         const user = await authServices.createUser({ name, phoneNumber, password });
-        
+
         return res.status(201).json({
             message: "User has been created, please login to continue",
             data: {
@@ -24,7 +24,13 @@ exports.login = async (req, res) => {
 
         const user = await authServices.authorizeUser({ phoneNumber, password });
 
-        const token = jwt.sign({ userID: user.userID, phoneNumber: user.phoneNumber, role: user.role }, process.env.JWTSECRET);
+        const jwtPayload = {
+            userID: user.userID,
+            phoneNumber: user.phoneNumber,
+            role: user.role,
+        };
+
+        const token = jwt.sign(jwtPayload, process.env.JWTSECRET, { expiresIn: "1h" });
 
         return res.status(200).json({
             message: "User has been logged in",
